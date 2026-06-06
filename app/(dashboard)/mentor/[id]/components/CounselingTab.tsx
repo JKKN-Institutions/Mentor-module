@@ -366,12 +366,13 @@ export default function CounselingTab({ mentorId }: CounselingTabProps) {
       );
 
       if (response.ok) {
-        const data = await response.json();
-        // Refresh sessions list from server
         await refetchSessions();
-        setSelectedSession(data.data);
+        // Close modal so the session re-opens fresh from the updated sessions list.
+        // The feedback route only returns { success: true } — not the full session object —
+        // so we cannot update selectedSession from the response body.
+        setShowViewModal(false);
+        setSelectedSession(null);
         toast.success('Session log submitted', 'Your session log has been saved successfully');
-        // Clear feedback form
         setFeedbackData({
           counselingQueries: '',
           actionTaken: '',
