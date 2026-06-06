@@ -49,39 +49,18 @@ export async function GET(request: Request) {
 
     const mentorIds = mentors.map((m) => m.id);
 
-    // Fetch counseling sessions with feedback (queries/actions)
+    // Fetch counseling sessions with embedded session_feedback (one-to-one join).
+    // session_feedback has no mentor_id column — joining by session_id is the only correct approach.
     let sessionsQuery = supabase
       .from('counseling_sessions')
-      .select('id, mentor_id, status, date')
+      .select('id, mentor_id, status, date, feedback:session_feedback(counseling_queries, action_taken)')
       .in('mentor_id', mentorIds);
 
     if (filters.dateFrom) sessionsQuery = sessionsQuery.gte('date', filters.dateFrom);
     if (filters.dateTo) sessionsQuery = sessionsQuery.lte('date', filters.dateTo);
 
-    // Fetch mentor-submitted counseling feedback (queries raised + actions taken)
-    let feedbackQuery = supabase
-      .from('counseling_feedback')
-      .select('session_id, mentor_id, counseling_queries, action_taken')
-      .in('mentor_id', mentorIds);
-
-    const [sessionsRes, feedbackRes] = await Promise.all([sessionsQuery, feedbackQuery]);
-
-    if (sessionsRes.error) return err(sessionsRes.error.message, 500);
-
-    const sessionRows = sessionsRes.data ?? [];
-
-    // Build feedback map: session_id → feedback row
-    const feedbackMap = new Map<string, { queriesRaised: boolean; actionTaken: boolean }>();
-    if (!feedbackRes.error && feedbackRes.data) {
-      for (const f of feedbackRes.data) {
-        const sessionId = (f as any).session_id ?? (f as any).counseling_session_id;
-        if (!sessionId) continue;
-        feedbackMap.set(sessionId, {
-          queriesRaised: !!(f.counseling_queries && f.counseling_queries.trim()),
-          actionTaken: !!(f.action_taken && f.action_taken.trim()),
-        });
-      }
-    }
+    const { data: sessionRows, error: sessionsError } = await sessionsQuery;
+    if (sessionsError) return err(sessionsError.message, 500);
 
     type Entry = {
       total: number;
@@ -96,7 +75,7 @@ export async function GET(request: Request) {
 
     const map = new Map<string, Entry>();
 
-    for (const s of sessionRows) {
+    for (const s of sessionRows ?? []) {
       if (!map.has(s.mentor_id)) {
         map.set(s.mentor_id, {
           total: 0,
@@ -117,13 +96,16 @@ export async function GET(request: Request) {
       else if (status === 'scheduled') e.scheduled += 1;
       else if (status === 'cancelled') e.cancelled += 1;
 
-      const fb = feedbackMap.get(s.id);
+      // session_feedback has UNIQUE(session_id); PostgREST returns it as an array — take first element.
+      const fb = Array.isArray(s.feedback) ? s.feedback[0] : s.feedback;
       if (fb) {
-        if (fb.queriesRaised) e.queriesRaised += 1;
-        if (fb.actionTaken) {
+        const hasQuery = !!(fb.counseling_queries && fb.counseling_queries.trim());
+        const hasTaken = !!(fb.action_taken && fb.action_taken.trim());
+        if (hasQuery) e.queriesRaised += 1;
+        if (hasTaken) {
           e.actionsTaken += 1;
           e.resolved += 1;
-        } else if (fb.queriesRaised) {
+        } else if (hasQuery) {
           e.pending += 1;
         }
       }
