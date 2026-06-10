@@ -30,9 +30,24 @@ export async function upsertUser(jkknUser: JKKNUser & {
   const normalizedEmail = jkknUser.email.toLowerCase();
 
   const isEmailOverrideSuperAdmin = SUPER_ADMIN_EMAIL_OVERRIDES.has(normalizedEmail);
-  const dbRole = isEmailOverrideSuperAdmin
+  let dbRole = isEmailOverrideSuperAdmin
     ? 'super_admin'
     : mapJkknRoleToDbRole(jkknUser.role);
+
+  // JKKN tokens for HODs often report only 'faculty' — on the platform, HOD is
+  // a designation, not a role. When 'hod' has been granted in our DB (by an
+  // admin), keep it; otherwise every login would silently downgrade the user
+  // and break department-scoped access.
+  if (dbRole === 'faculty') {
+    const { data: existingRows } = await supabaseAdmin
+      .from('users')
+      .select('role')
+      .or(`jkkn_user_id.eq.${jkknUser.id},email.eq.${normalizedEmail}`)
+      .limit(1);
+    if (existingRows?.[0]?.role === 'hod') {
+      dbRole = 'hod';
+    }
+  }
 
   const userData = {
     jkkn_user_id: jkknUser.id,

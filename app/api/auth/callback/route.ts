@@ -140,7 +140,11 @@ export async function POST(req: NextRequest) {
     recordLoginInBackground(storedUser.id, ip, userAgent);
 
     // ── Step 6: Set cookies + respond ───────────────────────────────────
-    const redirectUrl = getDefaultRouteForRole(jkknUser.role);
+    // DB role wins for 'hod': JKKN tokens report HODs as plain 'faculty',
+    // but an admin-granted 'hod' role should land on the dashboard.
+    const redirectUrl = getDefaultRouteForRole(
+      storedUser.role === 'hod' ? 'hod' : jkknUser.role
+    );
 
     const cookieStore = await cookies();
     cookieStore.set('access_token', access_token, {

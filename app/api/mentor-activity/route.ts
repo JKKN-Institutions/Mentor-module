@@ -51,9 +51,10 @@ export async function GET(request: NextRequest) {
 
     const supabaseAdmin = createAdminClient();
 
-    // Authorization: If not admin/mentor-incharge, can only view own activities
+    // Authorization: If not admin/mentor-incharge/HOD, can only view own activities
     let targetMentorId = mentorId;
     let institutionFilter: string | null = null;
+    let departmentFilter: string | null = null;
     const isSuperAdmin = userAccess.role === 'super_admin' || userAccess.isSuperAdmin;
     const isInstitutionAdmin = userAccess.role === 'institution_admin';
     const isMentorIncharge = userAccess.isMentorIncharge;
@@ -67,6 +68,10 @@ export async function GET(request: NextRequest) {
     } else if (isMentorIncharge) {
       // Mentor incharge can see all activities in their assigned institution
       institutionFilter = userAccess.mentorInchargeInstitutionId;
+    } else if (userAccess.role === 'hod' && userAccess.institutionId) {
+      // HOD can see all activities of mentors in their department
+      institutionFilter = userAccess.institutionId;
+      departmentFilter = userAccess.departmentId;
     } else {
       // Regular users can only view their own mentor activities
       const { data: mentor } = await supabaseAdmin
@@ -85,16 +90,31 @@ export async function GET(request: NextRequest) {
       targetMentorId = mentor.id;
     }
 
-    // For mentor incharge and institution admin, get mentor IDs in their institution
+    // For mentor incharge, institution admin, and HOD, get mentor IDs in scope
     let mentorIdsInInstitution: string[] = [];
     if (institutionFilter && !targetMentorId) {
-      const { data: mentorsInInstitution } = await supabaseAdmin
+      let mentorsQuery = supabaseAdmin
         .from('mentors')
         .select('id')
         .eq('institution_id', institutionFilter)
         .eq('is_active', true);
 
+      if (departmentFilter) {
+        mentorsQuery = mentorsQuery.eq('department_id', departmentFilter);
+      }
+
+      const { data: mentorsInInstitution } = await mentorsQuery;
       mentorIdsInInstitution = (mentorsInInstitution || []).map(m => m.id);
+
+      // No mentors in scope → empty result. Without this, the .in() filter
+      // below would be skipped and leak activities from other institutions.
+      if (mentorIdsInInstitution.length === 0) {
+        return NextResponse.json({
+          success: true,
+          activities: [],
+          pagination: { total: 0, limit, offset, hasMore: false },
+        });
+      }
     }
 
     // Build query
@@ -130,8 +150,10 @@ export async function GET(request: NextRequest) {
     // Apply filters
     if (targetMentorId) {
       query = query.eq('mentor_id', targetMentorId);
-    } else if (mentorIdsInInstitution.length > 0) {
-      // Filter by mentors in the institution for mentor incharge / institution admin
+    } else if (institutionFilter) {
+      // Scoped viewers (incharge / institution admin / HOD) must never fall
+      // through unfiltered — an empty mentor list means an empty result, not
+      // a cross-institution leak.
       query = query.in('mentor_id', mentorIdsInInstitution);
     }
 

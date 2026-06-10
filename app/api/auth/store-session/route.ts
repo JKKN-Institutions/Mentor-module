@@ -85,7 +85,10 @@ export async function POST(req: NextRequest) {
 
     // Get default route for user role — use resolved primary role so alias
     // roles (e.g. coe_office → faculty) land on the correct page instead of '/'.
-    const redirectUrl = getDefaultRouteForRole(primaryRole);
+    // DB role wins for 'hod': JKKN tokens report HODs as plain 'faculty'.
+    const redirectUrl = getDefaultRouteForRole(
+      storedUser.role === 'hod' ? 'hod' : primaryRole
+    );
 
     // Set HTTP-only cookies for server-side authentication
     const cookieStore = await cookies();

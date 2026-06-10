@@ -6,7 +6,7 @@
 /**
  * Access levels in the system (2 levels implemented)
  */
-export type AccessLevel = 'super_admin' | 'institution_admin' | 'mentor' | 'student';
+export type AccessLevel = 'super_admin' | 'institution_admin' | 'hod' | 'mentor' | 'student';
 
 /**
  * User access information
@@ -52,6 +52,7 @@ export interface AccessLevelMeta {
 export const ACCESS_LEVEL_HIERARCHY: Record<AccessLevel, number> = {
   super_admin: 1,
   institution_admin: 2,
+  hod: 3,
   mentor: 3,
   student: 4,
 };
@@ -73,6 +74,13 @@ export const ACCESS_LEVEL_META: Record<AccessLevel, AccessLevelMeta> = {
     description: 'Access to all data within their institution',
     canAccessAllInstitutions: false,
     canAccessAllDepartments: true, // Within their institution
+  },
+  hod: {
+    level: 3,
+    label: 'Head of Department',
+    description: 'Access to all mentor data within their department',
+    canAccessAllInstitutions: false,
+    canAccessAllDepartments: false,
   },
   mentor: {
     level: 3,

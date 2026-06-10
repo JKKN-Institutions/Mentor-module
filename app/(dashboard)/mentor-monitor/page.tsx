@@ -20,8 +20,18 @@ import AnalyticsFilters, {
   type FilterState,
   getAnalyticsDateRange,
 } from '@/app/(dashboard)/analytics/components/AnalyticsFilters';
+import dynamic from 'next/dynamic';
 import CoverageFunnelCard from '@/app/(dashboard)/analytics/components/CoverageFunnelCard';
-import CompletionDonutChart from '@/app/(dashboard)/analytics/components/CompletionDonutChart';
+
+// recharts-backed chart — code-split so the monitor page boots without it
+const CompletionDonutChart = dynamic(
+  () => import('@/app/(dashboard)/analytics/components/CompletionDonutChart'),
+  {
+    loading: () => (
+      <div className="bg-white rounded-xl border border-neutral-200 p-6 h-72 animate-pulse" />
+    ),
+  }
+);
 import MentorCompletionTable from '@/app/(dashboard)/analytics/components/MentorCompletionTable';
 import MenteeCoverageGrid from '@/app/(dashboard)/analytics/components/MenteeCoverageGrid';
 import ExportBar from '@/app/(dashboard)/analytics/components/ExportBar';
@@ -250,6 +260,7 @@ export default function MentorMonitorPage() {
     return (
       accessInfo.role === 'super_admin' ||
       accessInfo.role === 'institution_admin' ||
+      accessInfo.role === 'hod' ||
       accessInfo.isSuperAdmin ||
       accessInfo.isMentorIncharge
     );
