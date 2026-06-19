@@ -45,11 +45,13 @@ import MonitorTabs, { type MonitorTab } from './components/MonitorTabs';
 import IdpTrackerTab from './components/IdpTrackerTab';
 import FeedbackTab from './components/FeedbackTab';
 import CounselingActionsTab from './components/CounselingActionsTab';
+import CycleProgressTab from './components/CycleProgressTab';
 
 // New API types
 import type { IdpSummaryRow } from '@/app/api/mentor-monitor/idp-summary/route';
 import type { FeedbackSummaryRow } from '@/app/api/mentor-monitor/feedback-summary/route';
 import type { CounselingSummaryRow } from '@/app/api/mentor-monitor/counseling-summary/route';
+import type { CycleProgressRow } from '@/lib/types/cycle';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -250,9 +252,11 @@ export default function MentorMonitorPage() {
   const [idpData, setIdpData] = useState<IdpSummaryRow[]>([]);
   const [feedbackData, setFeedbackData] = useState<FeedbackSummaryRow[]>([]);
   const [counselingData, setCounselingData] = useState<CounselingSummaryRow[]>([]);
+  const [cycleData, setCycleData] = useState<CycleProgressRow[]>([]);
   const [idpLoading, setIdpLoading] = useState(false);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [counselingLoading, setCounselingLoading] = useState(false);
+  const [cycleLoading, setCycleLoading] = useState(false);
 
   // ── Role detection ────────────────────────────────────────────────────────
   const isAdmin = useMemo(() => {
@@ -422,6 +426,25 @@ export default function MentorMonitorPage() {
     }
   }, [accessToken, filters]);
 
+  const fetchCycles = useCallback(async () => {
+    if (!accessToken) return;
+    try {
+      setCycleLoading(true);
+      // Cycles are all-time by definition — only scope filters apply
+      // (the route ignores dateFrom/dateTo).
+      const qs = buildQS(filters);
+      const res = await fetchWithAuthRetry(
+        `/api/mentor-monitor/cycle-progress${qs ? `?${qs}` : ''}`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, credentials: 'include' },
+      );
+      if (res.ok) { const d = await res.json(); setCycleData(d?.data ?? []); }
+    } catch (e) {
+      console.error('[MentorMonitor] cycle fetch', e);
+    } finally {
+      setCycleLoading(false);
+    }
+  }, [accessToken, filters]);
+
   // ── Initial + filter-driven fetch ─────────────────────────────────────────
   useEffect(() => {
     if (authLoading || accessLoading || !user || !accessToken) return;
@@ -430,6 +453,7 @@ export default function MentorMonitorPage() {
     fetchIdps();
     fetchFeedback();
     fetchCounseling();
+    fetchCycles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, accessToken, authLoading, accessLoading, filterKey, mentorId]);
 
@@ -445,8 +469,9 @@ export default function MentorMonitorPage() {
       fetchIdps();
       fetchFeedback();
       fetchCounseling();
+      fetchCycles();
     }, 5000);
-  }, [fetchAnalytics, fetchActivity, fetchIdps, fetchFeedback, fetchCounseling]);
+  }, [fetchAnalytics, fetchActivity, fetchIdps, fetchFeedback, fetchCounseling, fetchCycles]);
 
   useEffect(() => {
     if (!user) return;
@@ -499,6 +524,13 @@ export default function MentorMonitorPage() {
         return (
           <div className="p-4 lg:p-6">
             <MenteeCoverageGrid rows={pairing} loading={analyticsLoading} />
+          </div>
+        );
+
+      case 'cycles':
+        return (
+          <div className="p-4 lg:p-6">
+            <CycleProgressTab data={cycleData} loading={cycleLoading} />
           </div>
         );
 

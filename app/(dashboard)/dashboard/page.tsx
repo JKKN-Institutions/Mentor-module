@@ -7,7 +7,19 @@ import { ActivityFeed } from './components/ActivityFeed';
 import { SessionCalendar } from './components/SessionCalendar';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import { TopMentorsCard } from './components/TopMentorsCard';
-import { DepartmentChart } from './components/DepartmentChart';
+import { CycleProgressCard } from './components/CycleProgressCard';
+import dynamic from 'next/dynamic';
+
+// recharts is ~100KB+ of JS the dashboard shell doesn't need to boot —
+// split it out so the stats/sessions render without waiting on it.
+const DepartmentChart = dynamic(
+  () => import('./components/DepartmentChart').then(m => m.DepartmentChart),
+  {
+    loading: () => (
+      <div className="bg-white rounded-xl border border-neutral-200 p-6 h-80 animate-pulse" />
+    ),
+  }
+);
 
 export default function DashboardPage() {
   const {
@@ -43,7 +55,8 @@ export default function DashboardPage() {
         <div className="lg:col-span-2">
           <ProgressCard departments={departmentProgress} loading={trendsLoading} />
         </div>
-        <div>
+        <div className="space-y-4 lg:space-y-5">
+          <CycleProgressCard />
           <SessionCalendar upcomingSessions={upcomingSessions} loading={sessionsLoading} />
         </div>
       </div>

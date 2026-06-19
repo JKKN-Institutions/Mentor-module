@@ -19,6 +19,39 @@ export interface CurrentUser {
 }
 
 /**
+ * Resolved-user cache, keyed by access token.
+ * Without this, EVERY API request re-runs the users lookup (plus the mentors
+ * fallback and self-heal backfill) even though validateToken() already caches
+ * the token verdict for 15 minutes. 5-minute TTL keeps role/institution
+ * changes propagating quickly while eliminating the per-request query tax.
+ */
+const userCache = new Map<string, { user: CurrentUser; expiresAt: number }>();
+const USER_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Self-heal backfill rate limiter, keyed by user ID.
+ * fetchAndBackfillInstitutionDepartment() calls the external JKKN HR API.
+ * For users whose profile can never be healed (no staff record), running it
+ * on every request adds 1-3 blocking external HTTP calls per API call.
+ */
+const healAttempts = new Map<string, number>();
+const HEAL_RETRY_INTERVAL = 60 * 60 * 1000; // 1 hour
+
+function cleanupUserCache() {
+  const now = Date.now();
+  for (const [token, entry] of userCache.entries()) {
+    if (now >= entry.expiresAt) userCache.delete(token);
+  }
+  for (const [userId, attemptedAt] of healAttempts.entries()) {
+    if (now - attemptedAt >= HEAL_RETRY_INTERVAL) healAttempts.delete(userId);
+  }
+}
+
+if (typeof setInterval !== 'undefined') {
+  setInterval(cleanupUserCache, 5 * 60 * 1000);
+}
+
+/**
  * Get current user from MyJKKN access token
  * Supports both Authorization header and cookie-based authentication
  * This function validates the MyJKKN token and returns the user from our database
@@ -43,6 +76,12 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     if (!accessToken) {
       console.error('[Auth] No access token found in headers or cookies');
       return null;
+    }
+
+    // Serve from cache — skips token validation AND all user-resolution queries
+    const cached = userCache.get(accessToken);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.user;
     }
 
     // Validate token with MyJKKN auth server
@@ -144,9 +183,15 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
     // Last-resort self-heal: if still missing (arts college faculty whose
     // JKKN Staff API record isn't returned by /staff/{id}), run the multi-tier
-    // backfill with email as the fallback key. Runs on every request that
-    // doesn't already have resolved data, so profiles eventually heal.
-    if (!resolvedInstitutionId || !resolvedDepartmentId) {
+    // backfill with email as the fallback key. Rate-limited to once per hour
+    // per user — it calls the external JKKN HR API, and for profiles that can
+    // never heal it would otherwise block every single request.
+    const lastHealAttempt = healAttempts.get(user.id);
+    if (
+      (!resolvedInstitutionId || !resolvedDepartmentId) &&
+      (!lastHealAttempt || Date.now() - lastHealAttempt >= HEAL_RETRY_INTERVAL)
+    ) {
+      healAttempts.set(user.id, Date.now());
       try {
         const enriched = await fetchAndBackfillInstitutionDepartment(
           user.id,
@@ -177,7 +222,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       })();
     }
 
-    return {
+    const currentUser: CurrentUser = {
       id: user.id,
       jkkn_user_id: user.jkkn_user_id,
       email: user.email,
@@ -187,6 +232,13 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       department_id: resolvedDepartmentId,
       is_super_admin: user.is_super_admin || false,
     };
+
+    userCache.set(accessToken, {
+      user: currentUser,
+      expiresAt: Date.now() + USER_CACHE_DURATION,
+    });
+
+    return currentUser;
   } catch (error) {
     console.error('[Auth] Error getting current user:', error);
     return null;

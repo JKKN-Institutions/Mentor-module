@@ -17,29 +17,68 @@ export async function POST(request: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // Fetch staff from JKKN API
-    const staffResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/jkkn/staff?limit=1000`, {
-      headers: {
-        'Authorization': request.headers.get('Authorization') || '',
-      },
-    });
+    // Fetch ALL staff directly from the JKKN API with pagination.
+    // The previous single `?limit=1000` call silently truncated when the API
+    // capped page size — and a partial staff list makes the reconciliation
+    // step below mass-deactivate mentors who are actually still active.
+    const apiKey = process.env.NEXT_PUBLIC_MYJKKN_API_KEY;
+    const baseUrl = process.env.NEXT_PUBLIC_MYJKKN_BASE_URL || 'https://www.jkkn.ai/api';
 
-    if (!staffResponse.ok) {
+    if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: 'Failed to fetch staff from JKKN API' },
+        { success: false, error: 'MyJKKN API key not configured' },
         { status: 500 }
       );
     }
 
-    const staffData = await staffResponse.json();
-    const staff = staffData.data || [];
+    const staff: any[] = [];
+    const pageLimit = 100;
+    let page = 1;
+    let fetchComplete = false;
 
-    console.log(`[Sync] Found ${staff.length} staff members from JKKN API`);
+    while (true) {
+      const res = await fetch(
+        `${baseUrl}/api-management/staff?page=${page}&limit=${pageLimit}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+
+      if (!res.ok) {
+        if (page === 1) {
+          return NextResponse.json(
+            { success: false, error: `Failed to fetch staff from JKKN API (${res.status})` },
+            { status: 500 }
+          );
+        }
+        // Mid-pagination failure: process what we have, but the list is
+        // incomplete — reconciliation must be skipped (fetchComplete stays false).
+        console.error(`[Sync] Staff page ${page} failed (${res.status}) — partial sync, skipping reconciliation`);
+        break;
+      }
+
+      const json = await res.json();
+      const rows = Array.isArray(json.data) ? json.data : [];
+      staff.push(...rows);
+
+      if (rows.length < pageLimit) {
+        fetchComplete = true;
+        break;
+      }
+      page++;
+    }
+
+    console.log(`[Sync] Found ${staff.length} staff members from JKKN API (complete: ${fetchComplete})`);
 
     let created = 0;
     let updated = 0;
     let skipped = 0;
     let deactivated = 0;
+    let blocked = 0;
     const errors: string[] = [];
 
     // Track local user IDs of every JKKN-sourced staff member seen in this sync.
@@ -53,6 +92,29 @@ export async function POST(request: NextRequest) {
         if (!email) {
           console.warn(`[Sync] Skipping staff ${s.id} - no email`);
           skipped++;
+          continue;
+        }
+
+        // Staff marked inactive in MyJKKN must be blocked, not synced.
+        // Deactivate any local mentor record and move on — they are also
+        // excluded from syncedUserIds so reconciliation doesn't resurrect them.
+        if (s.is_active === false) {
+          const { data: inactiveUser } = await supabase
+            .from('users')
+            .select('id')
+            .or(`jkkn_user_id.eq.${s.id},email.eq.${email.toLowerCase()}`)
+            .limit(1)
+            .maybeSingle();
+
+          if (inactiveUser) {
+            const { data: blockedRows } = await supabase
+              .from('mentors')
+              .update({ is_active: false, updated_at: new Date().toISOString() })
+              .eq('user_id', inactiveUser.id)
+              .eq('is_active', true)
+              .select('id');
+            if (blockedRows && blockedRows.length > 0) blocked++;
+          }
           continue;
         }
 
@@ -177,8 +239,9 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Reconciliation: deactivate mentors no longer in JKKN ─────────────────
-    // Only run when we actually processed staff (guards against empty-API edge case).
-    if (syncedUserIds.size > 0) {
+    // Only run on a COMPLETE staff fetch — reconciling against a partial list
+    // would deactivate mentors who simply fell on a failed page.
+    if (fetchComplete && syncedUserIds.size > 0) {
       // Find all JKKN-sourced users (have a jkkn_user_id) that were NOT in this sync
       const { data: jkknUsers } = await supabase
         .from('users')
@@ -211,7 +274,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`[Sync] Complete - Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Deactivated: ${deactivated}`);
+    console.log(`[Sync] Complete - Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Blocked (inactive in JKKN): ${blocked}, Deactivated (absent from JKKN): ${deactivated}`);
 
     return NextResponse.json({
       success: true,
@@ -220,10 +283,11 @@ export async function POST(request: NextRequest) {
         created,
         updated,
         skipped,
+        blocked,
         deactivated,
         errors: errors.length,
       },
-      message: `Sync complete: ${created} created, ${updated} updated, ${skipped} skipped, ${deactivated} deactivated`,
+      message: `Sync complete: ${created} created, ${updated} updated, ${skipped} skipped, ${blocked} blocked (inactive in JKKN), ${deactivated} deactivated (absent from JKKN)`,
       errors: errors.length > 0 ? errors : undefined,
     });
   } catch (error: any) {

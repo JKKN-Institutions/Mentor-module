@@ -1,25 +1,18 @@
 import type { Metadata } from "next";
-import { Inter, Poppins } from "next/font/google";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import { ToastProvider } from "@/components/providers/ToastProvider";
 import { BugReporterWrapper } from "@/components/providers/BugReporterWrapper";
 import { Toaster } from 'react-hot-toast';
 
-// Professional font for entire application
+// Professional font for entire application.
+// Weight 300 dropped (no font-light usage); Inter removed (was never referenced).
 const poppins = Poppins({
   variable: "--font-poppins",
   subsets: ["latin"],
   display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
-});
-
-// Keep Inter as backup
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-  display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -35,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${poppins.variable} ${inter.variable} antialiased`}
+        className={`${poppins.variable} antialiased`}
         style={{ fontFamily: "var(--font-poppins)" }}
         suppressHydrationWarning
       >

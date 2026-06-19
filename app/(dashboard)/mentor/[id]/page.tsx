@@ -6,14 +6,25 @@ import { ArrowLeft, User, Users, MessageSquare, Calendar, FileText, Target, Down
 import { useMentorDetails } from '@/hooks/mentor/useMentorDetails';
 import { useAssignedStudents } from '@/hooks/mentor/useAssignedStudents';
 import { useCounselingSessions } from '@/hooks/mentor/useCounselingSessions';
-import CounselingTab from './components/CounselingTab';
-import StudentsTab from './components/StudentsTab';
-import AttendanceTab from './components/AttendanceTab';
-import ExamResultsTab from './components/ExamResultsTab';
-import IDPTab from './components/IDPTab';
-import AchievementTab from './components/AchievementTab';
-import ReportsTab from './components/ReportsTab';
-import StudentFeedbackTab from './components/StudentFeedbackTab';
+import dynamic from 'next/dynamic';
+
+// Tabs are code-split: each loads on first activation instead of shipping in
+// the page bundle. IDPTab alone pulls in the entire tiptap editor — without
+// splitting, every visitor downloads it even if they never open the IDP tab.
+const tabLoading = () => (
+  <div className="flex items-center justify-center py-16">
+    <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-neutral-200 border-t-brand-green" />
+  </div>
+);
+
+const StudentsTab = dynamic(() => import('./components/StudentsTab'), { loading: tabLoading });
+const CounselingTab = dynamic(() => import('./components/CounselingTab'), { loading: tabLoading });
+const AttendanceTab = dynamic(() => import('./components/AttendanceTab'), { loading: tabLoading });
+const ExamResultsTab = dynamic(() => import('./components/ExamResultsTab'), { loading: tabLoading });
+const IDPTab = dynamic(() => import('./components/IDPTab'), { loading: tabLoading });
+const AchievementTab = dynamic(() => import('./components/AchievementTab'), { loading: tabLoading });
+const ReportsTab = dynamic(() => import('./components/ReportsTab'), { loading: tabLoading });
+const StudentFeedbackTab = dynamic(() => import('./components/StudentFeedbackTab'), { loading: tabLoading });
 
 type TabType = 'students' | 'counseling' | 'attendance' | 'examResults' | 'idp' | 'achievement' | 'reports' | 'studentFeedback';
 

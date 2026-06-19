@@ -18,10 +18,12 @@ export default function AuthenticatedLayout({
     setMounted(true);
   }, []);
 
-  // Redirect to login if not authenticated
+  // Redirect to login if not authenticated. Go directly to /login — pushing
+  // "/" would hit the proxy redirect, and a stale auth cookie there could
+  // bounce us straight back here in a loop.
   useEffect(() => {
     if (!loading && !user) {
-      router.push('/');
+      router.push('/login');
     }
   }, [user, loading, router]);
 

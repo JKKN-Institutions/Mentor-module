@@ -149,21 +149,41 @@ async function ensureMentorRecord(
   try {
     const supabaseAdmin = createAdminClient();
 
-    const { error } = await supabaseAdmin
+    const { data: existing } = await supabaseAdmin
       .from('mentors')
-      .upsert(
-        {
-          user_id: userId,
-          department_id: departmentId,
-          institution_id: institutionId,
-          designation: designation || null,
-          total_students: 0,
-          is_active: true,
-        },
-        {
-          onConflict: 'user_id',
-        }
-      );
+      .select('id, is_active')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existing) {
+      // Refresh org fields only, and only with non-empty values so a token
+      // that omits institution/department can't blank out self-healed data.
+      // Never touch is_active (a mentor blocked because their JKKN staff
+      // record is inactive must stay blocked across logins) and never reset
+      // total_students.
+      const updatePayload: Record<string, string> = {};
+      if (departmentId) updatePayload.department_id = departmentId;
+      if (institutionId) updatePayload.institution_id = institutionId;
+      if (designation) updatePayload.designation = designation;
+
+      if (Object.keys(updatePayload).length > 0) {
+        const { error } = await supabaseAdmin
+          .from('mentors')
+          .update(updatePayload)
+          .eq('id', existing.id);
+        if (error) console.error('Error updating mentor record:', error);
+      }
+      return;
+    }
+
+    const { error } = await supabaseAdmin.from('mentors').insert({
+      user_id: userId,
+      department_id: departmentId,
+      institution_id: institutionId,
+      designation: designation || null,
+      total_students: 0,
+      is_active: true,
+    });
 
     if (error && error.code !== '23505') {
       console.error('Error creating mentor record:', error);

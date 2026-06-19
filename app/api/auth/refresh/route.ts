@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { seedValidationCache } from '@/lib/auth/token-validation';
 import { createClient } from '@supabase/supabase-js';
 
@@ -80,6 +81,30 @@ export async function POST(req: NextRequest) {
             dbErr instanceof Error ? dbErr.message : dbErr,
           );
         }
+      }
+    }
+
+    // Renew the auth cookies. Login (/api/auth/callback) sets these with
+    // maxAge = expires_in, so without renewal here the cookie dies ~1 hour
+    // after login while localStorage keeps refreshing — and the proxy then
+    // bounces logged-in users through /login on every entry (double page load).
+    if (data.access_token) {
+      const cookieStore = await cookies();
+      cookieStore.set('access_token', data.access_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: data.expires_in ?? 3600,
+        path: '/',
+      });
+      if (data.refresh_token) {
+        cookieStore.set('refresh_token', data.refresh_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 24 * 30, // 30 days
+          path: '/',
+        });
       }
     }
 

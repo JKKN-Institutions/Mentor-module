@@ -42,6 +42,9 @@ function transformStaffData(apiStaff: any) {
     phone: apiStaff.phone || apiStaff.phone_number || apiStaff.mobile || '',
     institution_email: apiStaff.institution_email || apiStaff.institutionEmail || apiStaff.email || '',
     designation: apiStaff.designation || apiStaff.position || 'Staff',
+    // Staff active status from MyJKKN — drives mentor blocking. Default to
+    // true only when the API omits the field entirely.
+    is_active: apiStaff.is_active ?? apiStaff.isActive ?? true,
     // Handle nested department object
     department: apiStaff.department
       ? (typeof apiStaff.department === 'object'

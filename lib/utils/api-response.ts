@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-export function ok<T>(data: T, meta?: { total?: number }): NextResponse {
+export function ok<T>(data: T, meta?: { total?: number } & Record<string, unknown>): NextResponse {
   return NextResponse.json({ success: true, data, ...(meta && { meta }) });
 }
 

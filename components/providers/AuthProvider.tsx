@@ -184,7 +184,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = authUrl;
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Clear the httpOnly auth cookies server-side BEFORE wiping localStorage.
+    // The proxy redirects "/" based on the access_token cookie — if it
+    // outlives the localStorage session, a logged-out user gets bounced to
+    // /dashboard and back in a redirect loop until the cookie expires.
+    const token = localStorage.getItem('access_token');
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        keepalive: true,
+      });
+    } catch {
+      // Non-fatal: cookie expires on its own; localStorage cleanup still runs
+    }
+
     // Clear all auth data
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
@@ -207,8 +222,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setTokenExpiresAt(0);
 
-    // Redirect to home page
-    window.location.href = '/';
+    // Go straight to /login — routing through "/" would just bounce off the
+    // proxy redirect and add an extra page load.
+    window.location.href = '/login';
   }, []);
 
   // Handle session expiry from fetchWithAuthRetry

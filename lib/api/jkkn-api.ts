@@ -97,6 +97,7 @@ export interface StaffMember {
   phone: string;
   institution_email: string;
   designation: string;
+  is_active: boolean;
   department: {
     id: string;
     department_name: string;

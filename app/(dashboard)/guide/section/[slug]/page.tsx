@@ -4,7 +4,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { fetchGuideSectionBySlug, markContentAsViewed } from '@/lib/api/guide';
 import type { GuideSectionWithProgress, GuideContent } from '@/lib/types/guide';
-import ReactMarkdown from 'react-markdown';
+import dynamic from 'next/dynamic';
+
+// react-markdown (plus its remark/unified dependency tree) is split out so
+// the section shell renders while the markdown renderer chunk loads.
+const ReactMarkdown = dynamic(() => import('react-markdown'), {
+  loading: () => <div className="h-24 bg-neutral-100 rounded-lg animate-pulse" />,
+});
 
 export default function GuideSectionPage() {
   const params = useParams();

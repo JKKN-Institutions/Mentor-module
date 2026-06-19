@@ -9,12 +9,14 @@ import {
   FileText,
   MessageSquare,
   CalendarCheck,
+  RotateCw,
 } from 'lucide-react';
 
 export type MonitorTab =
   | 'overview'
   | 'leaderboard'
   | 'coverage'
+  | 'cycles'
   | 'activity'
   | 'idps'
   | 'feedback'
@@ -30,6 +32,7 @@ const TABS: TabConfig[] = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
   { id: 'leaderboard', label: 'Leaderboard', icon: <Trophy className="w-4 h-4" /> },
   { id: 'coverage', label: 'Coverage', icon: <Users2 className="w-4 h-4" /> },
+  { id: 'cycles', label: 'Cycles', icon: <RotateCw className="w-4 h-4" /> },
   { id: 'activity', label: 'Activity', icon: <Activity className="w-4 h-4" /> },
   { id: 'idps', label: 'IDPs', icon: <FileText className="w-4 h-4" /> },
   { id: 'feedback', label: 'Feedback', icon: <MessageSquare className="w-4 h-4" /> },
