@@ -1,6 +1,15 @@
-# Mentor Duplicate-Account Consolidation — DRY RUN PLAN
+# Mentor Duplicate-Account Consolidation
 
-> **Status: PROPOSAL — no database writes have been made.** Review and approve before anything runs.
+> **Status: Categories 1 & 2 EXECUTED 2026-06-27.** 28 duplicate rows merged into 27 canonical
+> mentors and deactivated. Verified: DEEPIKA 39, VENNILA 34, JASWANTH 10, VINOD 9; 0 active
+> duplicate accounts remain; 0 cache drift; 0 orphaned assignments.
+>
+> **Category 3 (MEENA S, Dakshina) — STILL PENDING your decision.**
+>
+> **Separate open item:** 115 students are assigned only to deactivated mentors with no active
+> counterpart (departed/replaced staff, incl. Category 3). Re-homing them needs a decision on who
+> inherits each group — NOT covered by this duplicate-account migration.
+>
 > Generated 2026-06-27 from live Supabase data.
 
 ## Problem
