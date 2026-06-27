@@ -394,6 +394,21 @@ export async function assignStudentsToMentor(
     }
   }
 
+  // Recompute total_students explicitly (don't rely solely on the DB trigger,
+  // which historically was absent — see migration 20260627000000). Mirrors
+  // bulkAssignStudents so both assignment paths maintain the cached count.
+  if (result.assigned > 0) {
+    const { count } = await supabaseAdmin
+      .from('mentor_students')
+      .select('*', { count: 'exact', head: true })
+      .eq('mentor_id', mentorId);
+
+    await supabaseAdmin
+      .from('mentors')
+      .update({ total_students: count || 0, updated_at: new Date().toISOString() })
+      .eq('id', mentorId);
+  }
+
   return result;
 }
 
@@ -424,6 +439,18 @@ export async function removeStudentFromMentor(
   if (deleteError) {
     throw new Error(`Failed to remove student: ${deleteError.message}`);
   }
+
+  // Recompute total_students explicitly (see migration 20260627000000) rather
+  // than depending only on the DB trigger.
+  const { count } = await supabaseAdmin
+    .from('mentor_students')
+    .select('*', { count: 'exact', head: true })
+    .eq('mentor_id', resolved.mentor.id);
+
+  await supabaseAdmin
+    .from('mentors')
+    .update({ total_students: count || 0, updated_at: new Date().toISOString() })
+    .eq('id', resolved.mentor.id);
 
   console.log(`[removeStudentFromMentor] Removed student ${studentId} from mentor ${resolved.mentor.id}`);
 }

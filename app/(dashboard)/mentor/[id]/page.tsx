@@ -46,7 +46,10 @@ export default function MentorDetailPage() {
 
   const { mentor, loading: mentorLoading, error } = useMentorDetails(mentorId);
   const { students } = useAssignedStudents(mentorId);
-  const { sessions } = useCounselingSessions(mentorId);
+  // Single sessions source shared with CounselingTab so the "Pending Feedback"
+  // counter below updates the moment a log is submitted in the tab.
+  const counseling = useCounselingSessions(mentorId);
+  const { sessions } = counseling;
 
   const [activeTab, setActiveTab] = useState<TabType>('students');
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
@@ -270,7 +273,7 @@ export default function MentorDetailPage() {
               <StudentsTab mentorId={mentorId} />
             )}
             {activeTab === 'counseling' && (
-              <CounselingTab mentorId={mentorId} />
+              <CounselingTab mentorId={mentorId} counseling={counseling} />
             )}
             {activeTab === 'attendance' && (
               <AttendanceTab mentorId={mentorId} />

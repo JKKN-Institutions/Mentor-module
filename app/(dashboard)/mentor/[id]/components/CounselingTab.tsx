@@ -15,9 +15,13 @@ import { fetchWithAuthRetry } from '@/lib/utils/fetch-with-auth-retry';
 
 interface CounselingTabProps {
   mentorId: string;
+  // Single source of truth for sessions, owned by the parent page so the
+  // profile's "Pending Feedback" counter and this tab stay in sync — submitting
+  // a log here calls the SAME refetch the counter reads from.
+  counseling: ReturnType<typeof useCounselingSessions>;
 }
 
-export default function CounselingTab({ mentorId }: CounselingTabProps) {
+export default function CounselingTab({ mentorId, counseling }: CounselingTabProps) {
   const toast = useToast();
 
   const {
@@ -28,7 +32,7 @@ export default function CounselingTab({ mentorId }: CounselingTabProps) {
     refetch: refetchSessions,
     deleteSession: hookDeleteSession,
     addStudentToSession: hookAddStudentToSession,
-  } = useCounselingSessions(mentorId);
+  } = counseling;
 
   // Create Session Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -366,12 +370,28 @@ export default function CounselingTab({ mentorId }: CounselingTabProps) {
       );
 
       if (response.ok) {
-        await refetchSessions();
-        // Close modal so the session re-opens fresh from the updated sessions list.
-        // The feedback route only returns { success: true } — not the full session object —
-        // so we cannot update selectedSession from the response body.
-        setShowViewModal(false);
-        setSelectedSession(null);
+        // Update the OPEN session in place so the modal stays open and immediately
+        // shows the saved log (the view switches to the read-only feedback card).
+        // The feedback route only returns { success: true }, so we build the saved
+        // feedback object locally from what we just submitted.
+        setSelectedSession(prev =>
+          prev
+            ? {
+                ...prev,
+                status: 'completed',
+                feedback: {
+                  counselingQueries: feedbackData.counselingQueries,
+                  actionTaken: feedbackData.actionTaken,
+                  attachmentUrl: attachmentUrl || undefined,
+                  submittedAt: new Date().toISOString(),
+                  submittedBy: '',
+                },
+              }
+            : prev
+        );
+        // Sync the list in the background (updates pending-feedback counts, etc.)
+        // without closing the modal.
+        void refetchSessions();
         toast.success('Session log submitted', 'Your session log has been saved successfully');
         setFeedbackData({
           counselingQueries: '',

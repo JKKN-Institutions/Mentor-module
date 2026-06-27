@@ -102,6 +102,30 @@ function getInstitutionId(institution: any): string {
   return '';
 }
 
+/**
+ * Run a Supabase `.in(column, values)` filter in chunks and merge the results.
+ *
+ * PostgREST encodes `.in()` values into the request URL. With hundreds of UUIDs
+ * or emails (e.g. an institution with 365 staff), the URL exceeds the gateway's
+ * length limit and the request fails — supabase-js then returns `{ data: null }`,
+ * which callers silently treat as "no matches". That made every mentor card show
+ * 0 students in the admin directory even though the data existed. Chunking keeps
+ * each URL small so the lookups always succeed.
+ */
+async function fetchInChunks<T>(
+  values: string[],
+  fetcher: (chunk: string[]) => Promise<T[]>,
+  chunkSize = 100
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < values.length; i += chunkSize) {
+    const chunk = values.slice(i, i + chunkSize);
+    if (chunk.length === 0) continue;
+    out.push(...(await fetcher(chunk)));
+  }
+  return out;
+}
+
 // ── getMentorById ─────────────────────────────────────────────────────────────
 
 /**
@@ -616,15 +640,21 @@ export async function getMentorList(
     .map((s: any) => s.email || s.institution_email)
     .filter(Boolean);
 
-  const { data: usersByJkkn } = await supabaseAdmin
-    .from('users')
-    .select('id, jkkn_user_id, email')
-    .in('jkkn_user_id', jkknStaffIds);
+  const usersByJkkn = await fetchInChunks(jkknStaffIds, async (chunk) => {
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id, jkkn_user_id, email')
+      .in('jkkn_user_id', chunk);
+    return data || [];
+  });
 
-  const { data: usersByEmail } = await supabaseAdmin
-    .from('users')
-    .select('id, jkkn_user_id, email')
-    .in('email', jkknStaffEmails);
+  const usersByEmail = await fetchInChunks(jkknStaffEmails, async (chunk) => {
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id, jkkn_user_id, email')
+      .in('email', chunk);
+    return data || [];
+  });
 
   const usersMap = new Map<string, { id: string; jkkn_user_id: string; email: string }>();
   usersByJkkn?.forEach(u => usersMap.set(u.id, u));
@@ -634,13 +664,37 @@ export async function getMentorList(
   const emailToUserMap = new Map(users.map(u => [u.email?.toLowerCase(), u.id]));
   const userIds = users.map(u => u.id);
 
-  const { data: mentorRecords } = await supabaseAdmin
-    .from('mentors')
-    .select('id, user_id, institution_id, department_id, total_students')
-    .in('user_id', userIds)
-    .eq('is_active', true);
+  const mentorRecords = await fetchInChunks(userIds, async (chunk) => {
+    const { data } = await supabaseAdmin
+      .from('mentors')
+      .select('id, user_id, institution_id, department_id')
+      .in('user_id', chunk)
+      .eq('is_active', true);
+    return data || [];
+  });
 
   const mentorIds = mentorRecords?.map(m => m.id) || [];
+
+  // Live student counts — count mentor_students rows directly rather than trusting
+  // the denormalized mentors.total_students column, which can drift when rows are
+  // inserted via a path that bypasses the trg_sync_mentor_total_students trigger
+  // (e.g. bulk backfills). The mentor detail page (getMentorById) already counts
+  // live; counting live here keeps the list and detail views consistent.
+  async function liveCountByMentor(ids: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (ids.length === 0) return counts;
+    const rows = await fetchInChunks(ids, async (chunk) => {
+      const { data } = await supabaseAdmin
+        .from('mentor_students')
+        .select('mentor_id')
+        .in('mentor_id', chunk);
+      return data || [];
+    });
+    rows.forEach((row: any) => {
+      counts.set(row.mentor_id, (counts.get(row.mentor_id) || 0) + 1);
+    });
+    return counts;
+  }
 
   const userToMentorMap = new Map(mentorRecords?.map(m => [m.user_id, m.id]) || []);
   // Map mentor_id → local institution/department UUIDs for role-based filtering.
@@ -650,9 +704,10 @@ export async function getMentorList(
     mentorRecords?.map(m => [m.id, { institution_id: m.institution_id, department_id: m.department_id }]) || []
   );
   const jkknToUserMap = new Map(users.map(u => [u.jkkn_user_id, u.id]));
-  const mentorStudentCountMap = new Map<string, number>();
-  mentorRecords?.forEach(m => {
-    mentorStudentCountMap.set(m.id, (m as any).total_students || 0);
+  const mentorStudentCountMap = await liveCountByMentor(mentorIds);
+  // Ensure every in-scope mentor has an explicit 0 (Map.get returns undefined otherwise)
+  mentorIds.forEach(id => {
+    if (!mentorStudentCountMap.has(id)) mentorStudentCountMap.set(id, 0);
   });
 
   // ── Transform to Mentor[] ─────────────────────────────────────────────────
@@ -710,15 +765,19 @@ export async function getMentorList(
 
     const { data: localMentors } = await supabaseAdmin
       .from('mentors')
-      .select('id, user_id, institution_id, department_id, total_students, users!inner(id, email, full_name, role)')
+      .select('id, user_id, institution_id, department_id, users!inner(id, email, full_name, role)')
       .not('user_id', 'is', null)
       .eq('is_active', true);
 
     if (localMentors && localMentors.length > 0) {
-      // Use total_students column (kept in sync by DB trigger) for local mentors
-      // not already in the count map.
-      for (const lm of localMentors.filter(lm => !mentorStudentCountMap.has(lm.id))) {
-        mentorStudentCountMap.set(lm.id, (lm as any).total_students || 0);
+      // Live-count local mentors not already in the count map (same rationale as
+      // mentorStudentCountMap above — don't trust the denormalized column).
+      const localOnlyIds = localMentors
+        .filter(lm => !mentorStudentCountMap.has(lm.id))
+        .map(lm => lm.id);
+      const localLiveCounts = await liveCountByMentor(localOnlyIds);
+      for (const id of localOnlyIds) {
+        mentorStudentCountMap.set(id, localLiveCounts.get(id) || 0);
       }
 
       // Build a name+department index of API mentors so we can detect when a
@@ -958,7 +1017,11 @@ export async function getMentorList(
             designation: supabaseMentor.designation || 'Faculty',
             phone: sbUser.phone_number || '',
             avatar: (supabaseMentor.avatar_url as string | null) ?? undefined,
-            totalStudents: mentorStudentCountMap.get(supabaseMentor.id) || 0,
+            // Own mentor record may be outside the JKKN-API-derived id set, so it
+            // won't be in mentorStudentCountMap — count it live as a fallback.
+            totalStudents: mentorStudentCountMap.has(supabaseMentor.id)
+              ? mentorStudentCountMap.get(supabaseMentor.id)!
+              : (await liveCountByMentor([supabaseMentor.id])).get(supabaseMentor.id) || 0,
           }];
           resolved = true;
           console.log(
@@ -1002,7 +1065,9 @@ export async function getMentorList(
             designation: 'Faculty',
             phone: userRecord.phone_number || '',
             avatar: undefined,
-            totalStudents: autoMentor ? (mentorStudentCountMap.get(autoMentor.id) || 0) : 0,
+            totalStudents: autoMentor
+              ? (await liveCountByMentor([autoMentor.id])).get(autoMentor.id) || 0
+              : 0,
           }];
           resolved = true;
           console.log(
