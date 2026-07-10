@@ -173,15 +173,19 @@ export async function getSessionsForMentor(mentorJkknId: string): Promise<Counse
           .filter((s: any) => s.student?.email && isPlaceholderEmail(s.student.email))
           .map((s: any) => s.student.id as string)
       ),
-    ].slice(0, 20);
+    ].slice(0, 8); // cap kept low: emails are cosmetic here and the sessions are
+                   // already loaded — this loop must not dominate response time.
 
     if (studentsNeedingEmail.length > 0) {
       await Promise.allSettled(
         studentsNeedingEmail.map(async (studentId: string) => {
           try {
+            // Short timeout: when JKKN can't resolve these learners (common for
+            // some institutions) the endpoint must still return quickly rather
+            // than stall the whole counseling tab for ~5s per load.
             const res = await fetch(
               `${baseUrl}/api-management/learners/profiles/${studentId}`,
-              { headers: { 'Authorization': `Bearer ${apiKey}` }, cache: 'no-store', signal: AbortSignal.timeout(5000) }
+              { headers: { 'Authorization': `Bearer ${apiKey}` }, cache: 'no-store', signal: AbortSignal.timeout(2000) }
             );
             if (res.ok) {
               const data = await res.json();
